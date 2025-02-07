@@ -207,7 +207,7 @@ def processar_alunos():
     if not alteracoes_feitas:
         print("✅ Todos os alunos já estão corretos na API. Nenhuma alteração necessária.")
     else:
-        print("🔄 Alterações concluídas na base de dados.")
+        print("🔄 Alterações concluídas nos dados da API.")
 
 # Executar
 if __name__ == "__main__":
