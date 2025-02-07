@@ -31,21 +31,25 @@ unidades_api = {
     "Recreio dos Bandeirantes": 35034
 }
 
-# Obter turmas da API
+# 🔹 Cache para turmas já consultadas
+turmas_cache = {}
+
 def obter_turmas_api(unit_id, nome_turma):
+    if (unit_id, nome_turma) in turmas_cache:
+        return turmas_cache[(unit_id, nome_turma)]  # Retorna do cache sem chamar API
+
     url = "https://app.redacaonline.com.br/api/classes"
-    payload = {"name": nome_turma, "unit_id": unit_id}
-    response = requests.get(url, headers=HEADERS, params=payload)
+    response = requests.get(url, headers=HEADERS, params={"name": nome_turma, "unit_id": unit_id})
 
     try:
-        turmas = response.json()  # A resposta é uma lista de dicionários
-        if not isinstance(turmas, list):  # Caso a resposta não seja uma lista, tratamos o erro
+        turmas = response.json()
+        if not isinstance(turmas, list):
             print(f"⚠ Resposta inesperada da API: {turmas}")
             return None
 
-        # Buscar a turma correta pelo nome
         for turma in turmas:
             if turma["name"] == str(nome_turma):
+                turmas_cache[(unit_id, nome_turma)] = turma["id"]  # Salva no cache
                 return turma["id"]
 
         print(f"⚠ Turma '{nome_turma}' não encontrada na unidade {unit_id}.")
@@ -55,30 +59,30 @@ def obter_turmas_api(unit_id, nome_turma):
         print(f"Erro ao obter turmas: {e}")
         return None
 
-# Buscar alunos paginados
+# 🔹 Busca única de todos os alunos na API
 def listar_alunos():
     url = "https://app.redacaonline.com.br/api/students"
-    alunos = []
+    alunos_api = {}
     page = 1
 
     while True:
-        print(f"🔄 Buscando alunos na página {page}...")  # Log de progresso
+        print(f"🔄 Buscando alunos na página {page}...")
         response = requests.get(url, headers=HEADERS, params={"page": page}, timeout=10)
-        
         if response.status_code != 200:
             print(f"Erro ao listar alunos: {response.text}")
-            return []
-        
+            return {}
+
         data = response.json()
-        alunos.extend(data.get("data", []))
-        
+        for aluno in data.get("data", []):
+            alunos_api[aluno["external_id"]] = aluno  # Criamos um dicionário {matricula: aluno}
+
         if "next_page_url" not in data or not data["next_page_url"]:
             print("✅ Todas as páginas de alunos foram carregadas.")
             break
         
         page += 1
     
-    return alunos
+    return alunos_api
 
 # Obter aluno na API pelo external_id
 def obter_aluno_api(matricula):
@@ -161,6 +165,7 @@ codigo_para_unidade = {
     "17": "Recreio dos Bandeirantes"
 }
 
+# 🔹 Processamento otimizado
 def processar_alunos():
     conn = psycopg2.connect(**db_config)
     cursor = conn.cursor()
@@ -169,34 +174,25 @@ def processar_alunos():
         FROM alunos_25_geral 
         WHERE turma::NUMERIC >= 11900::NUMERIC
     """)
-    
     alunos = cursor.fetchall()
     conn.close()
     
-    alunos_api = listar_alunos()  # 🔹 Obtém a lista de alunos apenas uma vez
+    alunos_api_dict = listar_alunos()  # Obtém todos os alunos uma única vez
     alteracoes_feitas = False
 
     for unidade_codigo, sit, matricula, nome, turma in alunos:
         unidade_codigo = unidade_codigo.strip().zfill(2)
-        unidade_nome = codigo_para_unidade.get(unidade_codigo)
-        
-        if not unidade_nome:
-            print(f"⚠ Unidade com código '{unidade_codigo}' não encontrada no mapeamento.")
-            continue
-
-        unit_id = unidades_api.get(unidade_nome)
-
+        unit_id = unidades_api.get(codigo_para_unidade.get(unidade_codigo))
         if not unit_id:
-            print(f"⚠ Unidade '{unidade_nome}' não encontrada no dicionário de IDs.")
+            print(f"⚠ Unidade '{unidade_codigo}' não encontrada.")
             continue
 
-        class_id = obter_turmas_api(unit_id, turma)
+        class_id = turmas_cache.get((unit_id, turma)) or obter_turmas_api(unit_id, turma)
         if not class_id:
-            print(f"⚠ Turma {turma} não encontrada para a unidade {unidade_nome}.")
+            print(f"⚠ Turma {turma} não encontrada para a unidade {unit_id}.")
             continue
 
-        # 🔹 Busca o aluno na lista já carregada
-        aluno_api = next((aluno for aluno in alunos_api if aluno["external_id"] == str(matricula)), None)
+        aluno_api = alunos_api_dict.get(str(matricula))  # Busca direta, sem chamadas extras
 
         if sit in [2, 4] and aluno_api:
             remover_aluno(aluno_api["name"])
@@ -209,9 +205,9 @@ def processar_alunos():
             alteracoes_feitas = True
 
     if not alteracoes_feitas:
-        print(f"✅ Todos os alunos da unidade {unidade_codigo} já estão corretos na API. Nenhuma alteração necessária.")
+        print("✅ Todos os alunos já estão corretos na API. Nenhuma alteração necessária.")
     else:
-        print(f"🔄 Alterações concluídas na base de dados da unidade {unidade_codigo}.")
+        print("🔄 Alterações concluídas na base de dados.")
 
 # Executar
 if __name__ == "__main__":
