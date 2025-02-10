@@ -107,10 +107,9 @@ def obter_student_id(nome_aluno):
     return None
 
 # Remover aluno
-def remover_aluno(nome_aluno):
-    student_id = obter_student_id(nome_aluno)
+def remover_aluno(student_id, nome_aluno):
     if not student_id:
-        print("Não foi possível encontrar o aluno.")
+        print(f"Não foi possível encontrar o aluno {nome_aluno}.")
         return
 
     url = f"https://app.redacaonline.com.br/api/students/{student_id}"
@@ -199,8 +198,8 @@ def processar_alunos():
 
         aluno_api = alunos_api_dict.get(str(matricula))  # Busca direta, sem chamadas extras
 
-        if sit in [2, 4] and aluno_api:
-            remover_aluno(aluno_api["name"])
+        if int(sit) in [2, 4] and aluno_api:
+            remover_aluno(aluno_api["id"], aluno_api["name"])
             alteracoes_feitas = True
         elif not aluno_api:
             inserir_aluno(nome, matricula, class_id)
